@@ -557,6 +557,11 @@ async function dirPerm(ask) {
     return ask ? (await dirHandle.requestPermission({ mode: 'read' })) === 'granted' : false;
   } catch (e) { return false; }
 }
+let dirCache = null, dirCacheAt = 0;
+async function dirListCached() {
+  if (!dirCache || Date.now() - dirCacheAt > 15000) { dirCache = await listDir(dirHandle); dirCacheAt = Date.now(); }
+  return dirCache;
+}
 async function fileFromDir(rel) {
   let h = dirHandle; const parts = rel.split('/');
   for (let i = 0; i < parts.length - 1; i++) h = await h.getDirectoryHandle(parts[i]);
@@ -565,7 +570,7 @@ async function fileFromDir(rel) {
 async function pickFolder() {
   if (FSA) {
     try { dirHandle = await window.showDirectoryPicker({ id: 'awbo-pdfs', mode: 'read' }); } catch (e) { return; }
-    idbPut('kv', 'dirHandle', dirHandle);
+    idbPut('kv', 'dirHandle', dirHandle); dirCache = null;
     state.folder = { name: dirHandle.name };
     await syncFolder(await listDir(dirHandle));
     return;
@@ -715,8 +720,15 @@ async function loadBuffer(id) {
     } catch (e) {}
     if (cloud.on) showSync();
   }
-  if (FSA && dirHandle && s.rel && await dirPerm(false)) {
-    try { const b = await (await fileFromDir(s.rel)).arrayBuffer(); pdfBuffers.set(id, b); trimCache(id); return b; } catch (e) {}
+  if (FSA && dirHandle && await dirPerm(false)) {
+    try {
+      let file = s.rel ? await fileFromDir(s.rel).catch(() => null) : null;
+      if (!file) {   // path changed (e.g. project made with another folder level): find the PDF by file name
+        const hit = (await dirListCached()).find(e => e.name.toLowerCase() === (s.name || '').toLowerCase());
+        if (hit) { s.rel = hit.rel; s.disk = true; file = await fileFromDir(hit.rel).catch(() => null); scheduleSave(); }
+      }
+      if (file) { const b = await file.arrayBuffer(); pdfBuffers.set(id, b); trimCache(id); return b; }
+    } catch (e) {}
   }
   if (DESK && state.folder && state.folder.path && s.rel) {
     try { const b = await DESK.readFile(state.folder.path, s.rel); if (b) { pdfBuffers.set(id, b); trimCache(id); return b; } } catch (e) {}
@@ -773,9 +785,8 @@ async function renderViewer(keepRatio) {
     if ($('#bReFolder')) $('#bReFolder').onclick = pickFolder;
     if (FSA && dirHandle && s && s.rel) {
       const b = document.createElement('button'); b.className = 'btn primary'; b.style.marginTop = '10px'; b.textContent = '🔓 Allow access to the folder';
-      b.onclick = async () => { if (await dirPerm(true)) { pdfDocs.delete(id); renderViewer(); } };
-      viewer.querySelector('.empty-state').prepend(b);
-      if (await dirPerm(false)) { renderViewer(); return; }
+      b.onclick = async () => { if (await dirPerm(true)) { dirCache = null; pdfDocs.delete(id); renderViewer(); } };
+      if (!(await dirPerm(false))) viewer.querySelector('.empty-state').prepend(b);
     }
     return;
   }
