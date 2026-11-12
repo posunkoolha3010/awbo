@@ -1404,7 +1404,7 @@ $('#fDocx').onchange = async e => {
       state.parts.splice(i + 1, 0, ...newParts);
     }
     const got = restoreComments(newParts, read.comments);
-    if (!state.title) { state.title = base; $('#title').value = state.title; }
+    if (!hasText || r.replace || !state.title) { state.title = base; $('#title').value = state.title; }
     openPart(newParts[0].id, { noStore: true });
     refreshMarks(); drawHighlights(); hideInfo(); renderNoteList(); renderSourceBar(); renderLibrary(); scheduleSave();
     toast(got.links || got.notes ? `Document imported: ${got.links} links, ${got.notes} notes` : 'Document imported');
@@ -1451,7 +1451,7 @@ function attachAwboData(comments, data) {
   for (const c of comments) {
     if (c.meta) continue;
     if (c.author === 'AWBO') {
-      const lines = c.text.split('\n'); const mm = (lines[0] || '').match(/^(.*),\s*(?:p\.|с\.|psl\.)\s*(\d+)$/);
+      const lines = c.text.split('\n'); const mm = (lines[0] || '').match(/^(.*),\s*(?:p\.|с\.|psl\.|s\.)\s*(\d+)$/);
       if (!mm) continue;
       const q = norm((lines.slice(1).join(' ')).replace(/^\s*[“"«„]|[”"»“]\s*$/g, ''));
       const hit = links.find(x => !x.used && +x.p === +mm[2] && norm(x.q) === q) || links.find(x => !x.used && +x.p === +mm[2] && norm(x.q).startsWith(q.slice(0, 40)));
@@ -1498,7 +1498,7 @@ function restoreComments(parts, comments) {
       const m = c.meta;
       let isLink = m && m.t === 'link', page = m && m.p, quote = m && m.q, rects = (m && m.r) || [], srcMeta = m && m.s;
       if (!m && c.author === 'AWBO') {   // made by an older AWBO: "Label, p. 5" + “quote”
-        const lines = c.text.split('\n'); const mm = (lines[0] || '').match(/^(.*),\s*(?:p\.|с\.|psl\.)\s*(\d+)$/);
+        const lines = c.text.split('\n'); const mm = (lines[0] || '').match(/^(.*),\s*(?:p\.|с\.|psl\.|s\.)\s*(\d+)$/);
         if (mm) { isLink = true; srcMeta = { label: mm[1] }; page = +mm[2]; quote = (lines[1] || '').replace(/^[“"«„]|[”"»“]$/g, ''); rects = []; }
       }
       if (isLink && range) {
@@ -1525,21 +1525,22 @@ async function findQuoteRects(l) {
   const el = pagesEls[l.page - 1]; if (!el || !l.quote) return false;
   for (let i = 0; i < 50 && el._state !== 'done'; i++) { if (i === 0) el.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 100)); }
   const spans = [...el.querySelectorAll('.textLayer span')].filter(x => x.firstChild && x.firstChild.nodeType === 3);
+  // compare without any whitespace and with ligatures unfolded (ﬁ → fi), so sub/superscripts and line breaks do not matter
+  const fold = ch => ch.normalize('NFKC').toLowerCase().replace(/[\s­​]/g, '').replace(/[‐‑‒–—−]/g, '-').replace(/[“”„«»"]/g, '"').replace(/[‘’‚']/g, "'");
   let txt = ''; const map = [];
   for (const sp of spans) {
     const node = sp.firstChild, v = node.nodeValue;
-    for (let i = 0; i < v.length; i++) {
-      const ch = v[i];
-      if (/\s/.test(ch)) { if (!txt || txt.endsWith(' ')) continue; txt += ' '; map.push([node, i]); }
-      else { txt += ch.toLowerCase(); map.push([node, i]); }
-    }
-    if (txt && !txt.endsWith(' ')) { txt += ' '; map.push([node, v.length]); }
+    for (let i = 0; i < v.length; i++) { const f = fold(v[i]); for (const c of f) { txt += c; map.push([node, i]); } }
   }
-  const norm = t => t.toLowerCase().replace(/\s+/g, ' ').trim();
-  let q = norm(l.quote), idx = txt.indexOf(q);
-  if (idx < 0 && q.length > 60) { q = q.slice(0, 60); idx = txt.indexOf(q); }
-  if (idx < 0) return false;
-  const a = map[idx], b = map[idx + q.length - 1];
+  let q = [...l.quote].map(fold).join(''), idx = txt.indexOf(q), len = q.length;
+  if (idx < 0) {   // try the longest piece that does match: start and end separately
+    const k = Math.min(40, Math.floor(q.length / 2));
+    const a0 = k > 8 ? txt.indexOf(q.slice(0, k)) : -1, b0 = k > 8 ? txt.indexOf(q.slice(-k), a0 < 0 ? 0 : a0) : -1;
+    if (a0 >= 0 && b0 >= a0 && b0 - a0 < q.length * 1.5) { idx = a0; len = b0 + k - a0; }
+    else if (a0 >= 0) { idx = a0; len = k; }
+    else return false;
+  }
+  const a = map[idx], b = map[idx + len - 1];
   const r = document.createRange(); r.setStart(a[0], a[1]); r.setEnd(b[0], Math.min(b[1] + 1, b[0].nodeValue.length));
   const bb = el.getBoundingClientRect(), out = [];
   for (const cr of r.getClientRects()) { if (cr.width < 1 || cr.height < 1) continue; const x = { p: l.page, x: (cr.left - bb.left) / bb.width, y: (cr.top - bb.top) / bb.height, w: cr.width / bb.width, h: cr.height / bb.height }; if (x.h > 0.08 || x.w > 0.98) continue; out.push(x); }
