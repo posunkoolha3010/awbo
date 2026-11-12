@@ -268,13 +268,20 @@ mark.cite.trashed{background:none;border-bottom:0;cursor:text}
   .opt{flex:none}
   #edScroll{padding:8px 6px 90px}
   #edWrap{flex-direction:column}
-  #parts{width:auto;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;align-items:center}
+  #parts{width:auto;min-width:0;max-width:none;border-right:0;border-bottom:1px solid var(--line);flex-direction:row;align-items:center}
+  #noteList{display:none}
+  body.a4 #pageWrap,#pageWrap{width:auto;max-width:none;zoom:1!important}
+  body.a4 #sheets{display:none}
+  body.a4 #editor{width:auto;max-width:none;min-height:70vh;background:#fff;box-shadow:var(--shadow);padding:28px 20px}
+  body.a4 #editor [data-pb]{margin-top:0!important}
+  #partTitle{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #parts .pth{display:none}
   #partList{display:flex;gap:4px;overflow-x:auto;padding:6px}
   .part{flex:none;max-width:60vw;background:#fff;box-shadow:0 0 0 1px var(--line)}
   .part .pc,.part .pa{display:none!important}
   #bA4,#bParts{display:none!important}
   body.reading #partTitle{pointer-events:none}
+  body.reading #partTitle:placeholder-shown{display:none}
   #editor{padding:28px 20px;min-height:70vh;font-size:12pt}
   #viewer{padding:8px 0 90px}
   #tabs{display:flex;position:fixed;left:0;right:0;bottom:0;height:56px;background:#fff;border-top:1px solid var(--line);z-index:35;padding-bottom:env(safe-area-inset-bottom)}
