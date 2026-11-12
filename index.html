@@ -1434,7 +1434,33 @@ async function readDocxWithComments(buf) {
            .replace(/<w:commentRangeEnd\b[^>]*?w:id="(-?\d+)"[^>]*?\/>/g, (m, id) => run(TOK('e', id)));
   zip.file('word/document.xml', xml);
   const res = await mammoth.convertToHtml({ arrayBuffer: await zip.generateAsync({ type: 'arraybuffer' }) }, { styleMap: ['u => u'] });
+  let data = null;
+  for (const name of Object.keys(zip.files)) {
+    if (!/^customXml\/item\d+\.xml$/i.test(name)) continue;
+    const t = await zip.file(name).async('string');
+    const mm = t.match(/<awbo[^>]*><!\[CDATA\[([\s\S]*)\]\]><\/awbo>/);
+    if (mm) { try { data = JSON.parse(mm[1].replace(/\]\]\]\]><!\[CDATA\[>/g, ']]>')); } catch (e) {} }
+  }
+  if (data) attachAwboData(comments, data);
   return { html: res.value, comments };
+}
+// give each comment exported by AWBO its full data back (source file, highlight position, note colour)
+function attachAwboData(comments, data) {
+  const norm = t => xmlSafe(t).toLowerCase().replace(/\s+/g, ' ').trim();
+  const links = (data.links || []).map(x => ({ ...x, used: false })), notes = (data.notes || []).map(x => ({ ...x, used: false }));
+  for (const c of comments) {
+    if (c.meta) continue;
+    if (c.author === 'AWBO') {
+      const lines = c.text.split('\n'); const mm = (lines[0] || '').match(/^(.*),\s*(?:p\.|с\.|psl\.)\s*(\d+)$/);
+      if (!mm) continue;
+      const q = norm((lines.slice(1).join(' ')).replace(/^\s*[“"«„]|[”"»“]\s*$/g, ''));
+      const hit = links.find(x => !x.used && +x.p === +mm[2] && norm(x.q) === q) || links.find(x => !x.used && +x.p === +mm[2] && norm(x.q).startsWith(q.slice(0, 40)));
+      if (hit) { hit.used = true; c.meta = { t: 'link', s: hit.s, p: hit.p, q: hit.q, r: hit.r }; }
+    } else if (c.author === 'Note') {
+      const hit = notes.find(x => !x.used && norm(x.t) === norm(c.text));
+      if (hit) { hit.used = true; c.meta = { t: 'note', c: hit.c }; }
+    }
+  }
 }
 function sourceFor(m) {
   if (!m) return null;
@@ -1542,7 +1568,23 @@ function safeName(s) { return s.replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 1
 const BLOCK = new Set(['P','DIV','H1','H2','H3','H4','H5','H6','UL','OL','TABLE','BLOCKQUOTE','HR','LI']);
 const AWBO_TAG = '⟦AWBO⟧';
 // invisible paragraph inside a Word comment that lets AWBO rebuild the link or note on import
-function awboTag(D, data) { return new D.Paragraph({ children: [new D.TextRun({ text: xmlSafe(AWBO_TAG + JSON.stringify(data)), vanish: true, size: 2 })] }); }
+// AWBO's own data travels in a Custom XML part: Word keeps it when saving but never shows it
+async function addAwboPart(blob, data) {
+  const zip = await JSZip.loadAsync(blob);
+  const json = xmlSafe(JSON.stringify(data)).replace(/]]>/g, ']]]]><![CDATA[>');
+  zip.file('customXml/item1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><awbo xmlns="urn:awbo:data"><![CDATA[' + json + ']]></awbo>', { createFolders: false });
+  zip.file('customXml/itemProps1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><ds:datastoreItem ds:itemID="{6F1B2E3A-7C4D-4E5F-9A8B-0C1D2E3F4A5B}" xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml"><ds:schemaRefs><ds:schemaRef ds:uri="urn:awbo:data"/></ds:schemaRefs></ds:datastoreItem>', { createFolders: false });
+  zip.file('customXml/_rels/item1.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/></Relationships>', { createFolders: false });
+  const relsPath = 'word/_rels/document.xml.rels';
+  let rels = await zip.file(relsPath).async('string');
+  rels = rels.replace('</Relationships>', '<Relationship Id="rIdAwbo1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXml/item1.xml"/></Relationships>');
+  zip.file(relsPath, rels);
+  let ct = await zip.file('[Content_Types].xml').async('string');
+  if (!/Extension="xml"/i.test(ct)) ct = ct.replace('</Types>', '<Default Extension="xml" ContentType="application/xml"/></Types>');
+  ct = ct.replace('</Types>', '<Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/></Types>');
+  zip.file('[Content_Types].xml', ct);
+  return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
 async function buildDocx(opts) {
   const D = window.docx;
   storeCurrentPart();
@@ -1555,7 +1597,7 @@ async function buildDocx(opts) {
   if (!opts.notes) { root.querySelectorAll('mark.note').forEach(m => m.replaceWith(...m.childNodes)); root.querySelectorAll('.note-pin').forEach(x => x.remove()); }
   const lastNote = new Map(); root.querySelectorAll('mark.note,.note-pin').forEach(m => lastNote.set(m.dataset.note, m));
   await Promise.all([...root.querySelectorAll('img')].map(i => i.decode ? i.decode().catch(() => {}) : null));
-  const comments = []; const cid = new Map();
+  const comments = []; const cid = new Map(); const awboData = { app: 'awbo', v: 1, links: [], notes: [] };
   const lastMark = new Map(); root.querySelectorAll('mark.cite').forEach(m => lastMark.set(m.dataset.link, m));
   let olInstance = 0;
   const imgs = new Map();
@@ -1591,7 +1633,8 @@ async function buildDocx(opts) {
           const key = 'n:' + nt.id;
           if (!cid.has(key)) {
             const n = cid.size; cid.set(key, n);
-            comments.push({ id: n, author: 'Note', initials: 'N', date: new Date(nt.created || Date.now()), children: [...xmlSafe(nt.text).split('\n').map(t => new D.Paragraph({ children: [new D.TextRun({ text: t })] })), awboTag(D, { t: 'note', c: nt.color })] });
+            awboData.notes.push({ t: xmlSafe(nt.text), c: nt.color });
+            comments.push({ id: n, author: 'Note', initials: 'N', date: new Date(nt.created || Date.now()), children: [...xmlSafe(nt.text).split('\n').map(t => new D.Paragraph({ children: [new D.TextRun({ text: t })] }))] });
             out.push(new D.CommentRangeStart(n));
           }
           runs(ch.childNodes, g, out);
@@ -1608,8 +1651,8 @@ async function buildDocx(opts) {
             const s = srcById(l.sourceId);
             comments.push({ id: n, author: 'AWBO', initials: 'CL', date: new Date(l.created || Date.now()),
               children: [new D.Paragraph({ children: [new D.TextRun({ text: xmlSafe(`${s ? s.label : 'Source'}, ${PG[LANG]} ${l.page}`), bold: true })] }),
-                         new D.Paragraph({ children: [new D.TextRun({ text: xmlSafe(`“${l.quote}”`) })] }),
-                         awboTag(D, { t: 'link', s: s ? { name: s.name, label: s.label, rel: s.rel } : null, p: l.page, q: l.quote, r: l.rects })] });
+                         new D.Paragraph({ children: [new D.TextRun({ text: xmlSafe(`“${l.quote}”`) })] })] });
+            awboData.links.push({ s: s ? { name: s.name, label: s.label, rel: s.rel } : null, p: l.page, q: xmlSafe(l.quote), r: l.rects });
             out.push(new D.CommentRangeStart(n));
           }
           runs(ch.childNodes, g, out);
@@ -1697,7 +1740,9 @@ async function buildDocx(opts) {
     numbering: { config: [{ reference: 'num', levels: [0, 1, 2, 3, 4, 5].map(l => ({ level: l, format: D.LevelFormat.DECIMAL, text: `%${l + 1}.`, alignment: D.AlignmentType.START, style: { paragraph: { indent: { left: 720 * (l + 1), hanging: 360 } } } })) }] },
     sections: [{ properties: { page: { margin: (() => { const m = mg(), tw = x => Math.round(x * 56.6929); return { top: tw(m.t), bottom: tw(m.b), left: tw(m.l), right: tw(m.r) }; })() } }, children }]
   });
-  return D.Packer.toBlob(doc);
+  const blob = await D.Packer.toBlob(doc);
+  if (!awboData.links.length && !awboData.notes.length) return blob;
+  return addAwboPart(blob, awboData);
 }
 
 /* ---------------- project file save / open / new ---------------- */
