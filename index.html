@@ -1447,7 +1447,16 @@ async function openFile(f) {
     const base = f.name.replace(/\.docx$/i, '');
     const known = read.data && read.data.parts && read.data.parts.length ? read.data.parts : null;
     let newParts = known ? splitByKnownParts(html, known) : splitIntoParts(html, add ? base : '');
-    if (newParts.length > 1) {
+    if (known && newParts.length === 1) {
+      // saved as one part, but the text has headings: offer to split them again
+      const alt = splitIntoParts(html, add ? base : '');
+      if (alt.length > 1) {
+        setStatus('');
+        const split = await modal({ title: 'Split into parts?', body: `The document has ${alt.length} headings. Each heading can start its own part, or the whole document can stay as one part (headings stay in the text).`, okText: 'Split into parts', cancelText: 'Keep as one part' });
+        if (split) newParts = alt;
+        setStatus('Importing…');
+      }
+    } else if (newParts.length > 1) {
       setStatus('');
       const split = await modal(known
         ? { title: 'Split into parts?', body: `The file is saved in ${newParts.length} parts. Keep them, or open the whole document as one part (part titles stay in the text as headings).`, okText: 'Keep the parts', cancelText: 'Keep as one part' }
