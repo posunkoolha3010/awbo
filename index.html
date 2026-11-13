@@ -1547,7 +1547,7 @@ document.querySelectorAll('#edBar [data-cmd],#edBar [data-block]').forEach(b => 
   b.addEventListener('click', () => {
     editor.focus();
     if ((b.dataset.cmd === 'undo' || b.dataset.cmd === 'redo') && tryLinkUndo(b.dataset.cmd === 'redo')) return;
-    if (b.dataset.cmd) document.execCommand(b.dataset.cmd, false, null);
+    if (b.dataset.cmd) { document.execCommand(b.dataset.cmd, false, null); if (/List$/.test(b.dataset.cmd)) { fixListWrappers(); scheduleLayout(); } }
     else document.execCommand('formatBlock', false, b.dataset.block);
     scheduleSave();
   });
@@ -2276,7 +2276,7 @@ function openPart(id, opts = {}) {
   if (pending.articleLinkId && id !== state.currentPart) cancelPending();
   const p = partById(id) || state.parts[0]; if (!p) return;
   state.currentPart = p.id;
-  editor.innerHTML = p.html || '<p><br></p>';
+  editor.innerHTML = p.html || '<p><br></p>'; fixListWrappers();
   editor.querySelectorAll('mark.cite.pending').forEach(m => m.replaceWith(...m.childNodes));
   $('#partTitle').value = p.title || '';
   updateEmpty(); refreshMarks(); renderParts(); openNotes.clear(); renderNoteList();
@@ -2404,12 +2404,29 @@ function setA4(on) {
 }
 $('#bA4').onclick = () => setA4(!document.body.classList.contains('a4'));
 function layoutBlocks() {
-  const out = [];
-  for (const el of editor.children) {
-    if (/^(UL|OL|BLOCKQUOTE)$/.test(el.tagName) || (el.tagName === 'DIV' && el.children.length)) out.push(...el.children);
+  const out = [], BLK = /^(UL|OL|BLOCKQUOTE|DIV|P|LI|H[1-6]|TABLE|FIGURE)$/;
+  const walk = (el, depth) => {
+    const blockKids = [...el.children].filter(c => BLK.test(c.tagName));
+    // containers (lists, quotes, a paragraph or item wrapping a list) are split into their parts
+    if (depth < 6 && blockKids.length && (/^(UL|OL|BLOCKQUOTE|DIV)$/.test(el.tagName) || blockKids.some(c => /^(UL|OL)$/.test(c.tagName))))
+      [...el.children].forEach(c => walk(c, depth + 1));
     else out.push(el);
-  }
+  };
+  [...editor.children].forEach(el => walk(el, 0));
   return out;
+}
+// the browser's list command can leave <p><ol>…</ol></p>: lift such lists out of the paragraph
+function fixListWrappers() {
+  editor.querySelectorAll('p > ol, p > ul').forEach(list => {
+    const p = list.parentElement; if (!p || p.parentElement === null) return;
+    const frag = document.createDocumentFragment(); let buf = null;
+    [...p.childNodes].forEach(n => {
+      if (n.nodeType === 1 && /^(OL|UL)$/.test(n.tagName)) { buf = null; frag.appendChild(n); }
+      else if (n.nodeType === 3 && !n.textContent.trim()) { }
+      else { if (!buf) { buf = document.createElement('p'); frag.appendChild(buf); } buf.appendChild(n); }
+    });
+    p.replaceWith(frag);
+  });
 }
 let layoutT = null;
 function scheduleLayout() { clearTimeout(layoutT); layoutT = setTimeout(layoutPages, 120); }
@@ -2888,6 +2905,7 @@ const CHANGELOG = [
    '▭ Edit area button: make an existing area bigger or smaller or move it',
    'Contact support button (✉) next to the language switch',
    'Undo (↶ or Ctrl+Z) also brings back a link removed by mistake',
+   'Numbered and bulleted lists split correctly across A4 pages',
    '“What’s new” button (✦) next to the language switch'],
    ru: ['Выделение области на сканах: кнопка ▭ Область, обведите фрагмент рамкой; на страницах-сканах появляется подсказка',
    'Яркость выделений: ползунок (Мягко / Средне / Ярко) для выделений в статье и в PDF',
@@ -2898,6 +2916,7 @@ const CHANGELOG = [
    'Кнопка «▭ Изменить область»: уже выделенную область можно увеличить, уменьшить или сдвинуть',
    'Кнопка «Написать в поддержку» (✉) рядом с выбором языка',
    '«Отменить» (↶ или Ctrl+Z) возвращает и случайно удалённую ссылку',
+   'Нумерованные и маркированные списки правильно переносятся между листами A4',
    'Кнопка «Что нового» (✦) рядом с выбором языка'],
    uk: ['Виділення області на сканах: кнопка ▭ Область, обведіть фрагмент рамкою; на сторінках-сканах з’являється підказка',
    'Яскравість виділень: повзунок (М’яко / Середньо / Яскраво) для виділень у статті та в PDF',
@@ -2908,6 +2927,7 @@ const CHANGELOG = [
    'Кнопка «▭ Змінити область»: уже виділену область можна збільшити, зменшити або зсунути',
    'Кнопка «Написати в підтримку» (✉) поруч із вибором мови',
    '«Скасувати» (↶ або Ctrl+Z) повертає й випадково видалене посилання',
+   'Нумеровані й марковані списки правильно переносяться між аркушами A4',
    'Кнопка «Що нового» (✦) поруч із вибором мови'],
    lt: ['Srities žymėjimas skenuotuose PDF: mygtukas ▭ Sritis, apveskite vietą rėmeliu; skenuotuose puslapiuose rodomas patarimas',
    'Paryškinimų ryškumas: slankiklis (Švelniai / Vidutiniškai / Ryškiai) straipsnyje ir PDF',
@@ -2918,6 +2938,7 @@ const CHANGELOG = [
    'Mygtukas „▭ Keisti sritį“: jau pažymėtą sritį galima padidinti, sumažinti ar perkelti',
    'Mygtukas „Rašyti pagalbai“ (✉) šalia kalbos pasirinkimo',
    '„Atšaukti“ (↶ arba Ctrl+Z) grąžina ir netyčia ištrintą nuorodą',
+   'Numeruoti ir ženklinti sąrašai teisingai perkeliami tarp A4 lapų',
    'Mygtukas „Kas naujo“ (✦) šalia kalbos pasirinkimo'],
    fi: ['Alueen valinta skannatuissa PDF:issä: ▭ Alue -painike, vedä kehys kohdan ympärille; skannatuilla sivuilla näkyy vihje',
    'Korostusten kirkkaus: liukusäädin (Pehmeä / Keskitaso / Kirkas) artikkelissa ja PDF:ssä',
@@ -2928,6 +2949,7 @@ const CHANGELOG = [
    '”▭ Muokkaa aluetta” -painike: jo valittua aluetta voi suurentaa, pienentää tai siirtää',
    '”Ota yhteyttä tukeen” -painike (✉) kielivalinnan vieressä',
    'Kumoa (↶ tai Ctrl+Z) palauttaa myös vahingossa poistetun linkin',
+   'Numeroidut ja luettelomerkityt luettelot jakautuvat oikein A4-sivuille',
    '”Mitä uutta” -painike (✦) kielivalinnan vieressä'] },
  { d: '2026-11-12', en: [
    'Word files are now the main format: New, Open, Save and Save as work with .docx',
