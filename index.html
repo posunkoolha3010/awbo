@@ -168,9 +168,10 @@ body.area #viewer .pdfpage{cursor:crosshair;touch-action:none;user-select:none}
 /* links panel */
 #linksPanel{position:absolute;top:44px;right:0;bottom:0;width:min(420px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 18px rgba(0,0,0,.08);z-index:20;display:none;flex-direction:column}
 #linksPanel.show{display:flex}
-#newsTab{position:fixed;right:0;top:42%;z-index:45;writing-mode:vertical-rl;background:var(--accent);color:#fff;border:0;border-radius:8px 0 0 8px;padding:12px 6px;font-family:inherit;font-size:12px;font-weight:600;line-height:1;height:auto;width:auto;min-width:0;max-width:none;display:block;white-space:nowrap;cursor:pointer;opacity:.85;box-shadow:-2px 2px 8px rgba(0,0,0,.12)}
-#newsTab:hover{opacity:1}
-#newsTab.dot::before{content:'';position:absolute;top:-4px;left:-4px;width:10px;height:10px;border-radius:50%;background:#e5533d;border:2px solid #fff}
+#newsBtn{position:relative;flex:none;width:30px;height:28px;min-width:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:var(--accent);background:#fff;border:1px solid var(--line);border-radius:7px;margin-right:6px;cursor:pointer}
+#newsBtn:hover{background:var(--accent-soft,#eef5f0)}
+#newsBtn svg{display:block}
+#newsBtn.dot::after{content:'';position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#e5533d;border:1.5px solid #fff}
 #newsPanel{position:fixed;top:0;right:0;bottom:0;width:min(400px,100%);background:#fff;border-left:1px solid var(--line);box-shadow:-6px 0 22px rgba(0,0,0,.12);z-index:65;display:none;flex-direction:column}
 #newsPanel.show{display:flex}
 #newsPanel .ph{display:flex;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);font-weight:600;font-size:15px}
@@ -178,7 +179,6 @@ body.area #viewer .pdfpage{cursor:crosshair;touch-action:none;user-select:none}
 #newsBody h4{margin:16px 0 6px;font-size:13px;color:var(--accent)}
 #newsBody ul{margin:0;padding-left:18px}
 #newsBody li{margin:4px 0;font-size:13px;line-height:1.45}
-@media (max-width:820px){#newsTab{top:auto;bottom:90px;padding:9px 4px;font-size:11px}}
 #libPanel{position:absolute;top:44px;left:0;bottom:0;width:min(400px,100%);background:#fff;border-right:1px solid var(--line);box-shadow:6px 0 18px rgba(0,0,0,.08);z-index:21;display:none;flex-direction:column}
 #libPanel.show{display:flex}
 #libPanel .ph{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);font-weight:600}
@@ -352,6 +352,7 @@ body.area #viewer .pdfpage{cursor:crosshair;touch-action:none;user-select:none}
   <button class="btn" id="bPdf" title="Export as PDF">Export to PDF</button>
   </div>
   <span id="status"></span><span id="cloudBadge" title="Sync"></span>
+  <button id="newsBtn" title="What’s new"><svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9z"/><path d="M19 14.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg></button>
   <select id="langSel" title="Language"></select>
 </div>
 
@@ -2763,31 +2764,31 @@ const CHANGELOG = [
    'Dialogs can be moved by their title; the PDF stays visible while you type a quote',
    '✎ Edit quote button in the link panel',
    'Area mode switches off by itself once the link is made',
-   'This “What’s new” tab'],
+   '“What’s new” button (✦) next to the language switch'],
    ru: ['Выделение области на сканах: кнопка ▭ Область, обведите фрагмент рамкой; на страницах-сканах появляется подсказка',
    'Яркость выделений: ползунок (Мягко / Средне / Ярко) для выделений в статье и в PDF',
    'Окна можно передвигать за заголовок; при вводе цитаты PDF остаётся виден',
    'Кнопка «✎ Изменить цитату» в панели ссылки',
    'Режим области сам выключается после создания ссылки',
-   'Эта вкладка «Что нового»'],
+   'Кнопка «Что нового» (✦) рядом с выбором языка'],
    uk: ['Виділення області на сканах: кнопка ▭ Область, обведіть фрагмент рамкою; на сторінках-сканах з’являється підказка',
    'Яскравість виділень: повзунок (М’яко / Середньо / Яскраво) для виділень у статті та в PDF',
    'Вікна можна пересувати за заголовок; під час введення цитати PDF залишається видимим',
    'Кнопка «✎ Змінити цитату» в панелі посилання',
    'Режим області сам вимикається після створення посилання',
-   'Ця вкладка «Що нового»'],
+   'Кнопка «Що нового» (✦) поруч із вибором мови'],
    lt: ['Srities žymėjimas skenuotuose PDF: mygtukas ▭ Sritis, apveskite vietą rėmeliu; skenuotuose puslapiuose rodomas patarimas',
    'Paryškinimų ryškumas: slankiklis (Švelniai / Vidutiniškai / Ryškiai) straipsnyje ir PDF',
    'Langus galima perkelti už antraštės; rašant citatą PDF lieka matomas',
    'Mygtukas „✎ Redaguoti citatą“ nuorodos skydelyje',
    'Srities režimas išsijungia pats, kai nuoroda sukurta',
-   'Šis skirtukas „Kas naujo“'],
+   'Mygtukas „Kas naujo“ (✦) šalia kalbos pasirinkimo'],
    fi: ['Alueen valinta skannatuissa PDF:issä: ▭ Alue -painike, vedä kehys kohdan ympärille; skannatuilla sivuilla näkyy vihje',
    'Korostusten kirkkaus: liukusäädin (Pehmeä / Keskitaso / Kirkas) artikkelissa ja PDF:ssä',
    'Ikkunoita voi siirtää otsikosta; PDF pysyy näkyvissä, kun kirjoitat lainausta',
    '”✎ Muokkaa lainausta” -painike linkkipaneelissa',
    'Aluetila sammuu itsestään, kun linkki on luotu',
-   'Tämä ”Mitä uutta” -välilehti'] },
+   '”Mitä uutta” -painike (✦) kielivalinnan vieressä'] },
  { d: '2026-11-12', en: [
    'Word files are now the main format: New, Open, Save and Save as work with .docx',
    'Export to PDF',
@@ -2868,10 +2869,10 @@ const CHANGELOG = [
 ];
 /*CHANGELOG-END*/
 (() => {
-  const tab = document.createElement('button'); tab.id = 'newsTab'; tab.textContent = 'What’s new'; tab.title = 'What’s new';
+  const tab = $('#newsBtn');
   const pan = document.createElement('div'); pan.id = 'newsPanel';
   pan.innerHTML = `<div class="ph">What’s new<button class="btn icon" style="margin-left:auto" id="bCloseNews" title="Close">×</button></div><div id="newsBody"></div>`;
-  document.body.append(tab, pan);
+  document.body.append(pan);
   const LOC = { en: 'en-GB', ru: 'ru-RU', uk: 'uk-UA', lt: 'lt-LT', fi: 'fi-FI' };
   const latest = CHANGELOG[0].d;
   let seen = ''; try { seen = localStorage.getItem('awbo-news-seen') || ''; } catch (e) {}
