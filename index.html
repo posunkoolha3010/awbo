@@ -1060,8 +1060,12 @@ viewer.addEventListener('pointerup', async e => {
   if (!res) return;
   const text = xmlSafe(String(res.value || '')).replace(/\s+/g, ' ').trim();
   pdfSel = { sourceId: state.activeSource, page: r.p, quote: text, rects: [r] };
-  const pb = d.pel.getBoundingClientRect();
-  offerPdfSel(pb.left + (r.x + r.w) * pb.width, pb.top + (r.y + r.h) * pb.height + 6, text, () => {});
+  // no extra popup: the area becomes the source right away
+  if (pending.articleLinkId) { finishLink(pending.articleLinkId, pdfSel); return; }
+  const src = srcById(state.activeSource);
+  pending.pdf = pdfSel;
+  if (isMobile()) setTab('art');
+  showPending(`Passage from “${src.label}”, p. ${pdfSel.page} selected. Now select a phrase in the article.`);
 });
 viewer.addEventListener('pointercancel', () => { if (areaDrag) { areaDrag.box.remove(); areaDrag = null; } });
 
@@ -2764,30 +2768,35 @@ const CHANGELOG = [
    'Dialogs can be moved by their title; the PDF stays visible while you type a quote',
    '✎ Edit quote button in the link panel',
    'Area mode switches off by itself once the link is made',
+   'After you type the quote for an area and press Continue, the area becomes the source right away, with no extra button',
    '“What’s new” button (✦) next to the language switch'],
    ru: ['Выделение области на сканах: кнопка ▭ Область, обведите фрагмент рамкой; на страницах-сканах появляется подсказка',
    'Яркость выделений: ползунок (Мягко / Средне / Ярко) для выделений в статье и в PDF',
    'Окна можно передвигать за заголовок; при вводе цитаты PDF остаётся виден',
    'Кнопка «✎ Изменить цитату» в панели ссылки',
    'Режим области сам выключается после создания ссылки',
+   'После ввода цитаты для области и «Продолжить» область сразу становится источником, без лишней кнопки',
    'Кнопка «Что нового» (✦) рядом с выбором языка'],
    uk: ['Виділення області на сканах: кнопка ▭ Область, обведіть фрагмент рамкою; на сторінках-сканах з’являється підказка',
    'Яскравість виділень: повзунок (М’яко / Середньо / Яскраво) для виділень у статті та в PDF',
    'Вікна можна пересувати за заголовок; під час введення цитати PDF залишається видимим',
    'Кнопка «✎ Змінити цитату» в панелі посилання',
    'Режим області сам вимикається після створення посилання',
+   'Після введення цитати для області й «Продовжити» область одразу стає джерелом, без зайвої кнопки',
    'Кнопка «Що нового» (✦) поруч із вибором мови'],
    lt: ['Srities žymėjimas skenuotuose PDF: mygtukas ▭ Sritis, apveskite vietą rėmeliu; skenuotuose puslapiuose rodomas patarimas',
    'Paryškinimų ryškumas: slankiklis (Švelniai / Vidutiniškai / Ryškiai) straipsnyje ir PDF',
    'Langus galima perkelti už antraštės; rašant citatą PDF lieka matomas',
    'Mygtukas „✎ Redaguoti citatą“ nuorodos skydelyje',
    'Srities režimas išsijungia pats, kai nuoroda sukurta',
+   'Įvedus citatą sričiai ir paspaudus „Tęsti“, sritis iškart tampa šaltiniu, be papildomo mygtuko',
    'Mygtukas „Kas naujo“ (✦) šalia kalbos pasirinkimo'],
    fi: ['Alueen valinta skannatuissa PDF:issä: ▭ Alue -painike, vedä kehys kohdan ympärille; skannatuilla sivuilla näkyy vihje',
    'Korostusten kirkkaus: liukusäädin (Pehmeä / Keskitaso / Kirkas) artikkelissa ja PDF:ssä',
    'Ikkunoita voi siirtää otsikosta; PDF pysyy näkyvissä, kun kirjoitat lainausta',
    '”✎ Muokkaa lainausta” -painike linkkipaneelissa',
    'Aluetila sammuu itsestään, kun linkki on luotu',
+   'Kun kirjoitat alueen lainauksen ja painat Jatka, alueesta tulee heti lähde ilman ylimääräistä painiketta',
    '”Mitä uutta” -painike (✦) kielivalinnan vieressä'] },
  { d: '2026-11-12', en: [
    'Word files are now the main format: New, Open, Save and Save as work with .docx',
