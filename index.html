@@ -1172,6 +1172,7 @@ function finishLink(articleId, sel) {
   refreshMarks();
   activateLink(articleId, { noScrollPdf: true });
   scheduleSave();
+  if (areaMode) setAreaMode(false);
   toast('Link created');
 }
 
