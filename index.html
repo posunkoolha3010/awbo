@@ -676,9 +676,17 @@ async function rescanFolder() {
 async function syncFolder(entries) {
   setStatus('Reading folder…');
   let added = 0, relinked = 0, restored = 0, firstNew = null;
+  const relsNow = new Set(entries.filter(en => isPdfName(en.name)).map(en => en.rel).filter(Boolean));
+  // the same PDF may sit in several subfolders: remember every place, keep one source
+  state.sources.forEach(x => { if (x.also) { x.also = x.also.filter(r => relsNow.has(r) && r !== x.rel); if (!x.also.length) delete x.also; } });
   for (const en of entries) {
     if (!isPdfName(en.name)) continue;
+    if (state.sources.some(x => x.also && x.also.includes(en.rel))) continue;
     let s = state.sources.find(x => x.rel && x.rel === en.rel) || state.sources.find(x => (x.name || '').toLowerCase() === en.name.toLowerCase());
+    if (s && en.rel && s.rel && s.rel !== en.rel && relsNow.has(s.rel)) {
+      s.also = [...new Set([...(s.also || []), en.rel])];
+      continue;
+    }
     if (s) {
       const had = pdfBuffers.has(s.id) || (!s.disk && await idbGet('pdfs', s.id));
       s.rel = en.rel;
@@ -746,11 +754,13 @@ function renderLibrary() {
 
 /* which folder a source came from, and which sources are cited in the text */
 const SEPARATE = 'Added separately';
-function srcFolder(s) {
-  if (s.rel && s.rel.includes('/')) return s.rel.slice(0, s.rel.lastIndexOf('/'));
-  if (s.rel) return state.folder ? state.folder.name : SEPARATE;
+function relFolder(rel) {
+  if (rel && rel.includes('/')) return rel.slice(0, rel.lastIndexOf('/'));
+  if (rel) return state.folder ? state.folder.name : SEPARATE;
   return SEPARATE;
 }
+function srcFolder(s) { return relFolder(s.rel); }
+const srcFolders = s => [...new Set([srcFolder(s), ...(s.also || []).map(relFolder)])];
 function citedCounts() {
   if (typeof storeCurrentPart === 'function' && state.parts) storeCurrentPart();
   const all = (state.parts || []).map(p => p.html).join('');
@@ -761,7 +771,7 @@ function citedCounts() {
 const natCmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 function groupedSources(list) {
   const g = new Map();
-  for (const s of list) { const f = srcFolder(s); if (!g.has(f)) g.set(f, []); g.get(f).push(s); }
+  for (const s of list) for (const f of srcFolders(s)) { if (!g.has(f)) g.set(f, []); g.get(f).push(s); }
   return [...g.entries()].sort((a, b) => (a[0] === SEPARATE) - (b[0] === SEPARATE) || natCmp(a[0], b[0]))
     .map(([f, arr]) => [f, arr.sort((a, b) => natCmp(a.label, b.label))]);
 }
@@ -2167,7 +2177,7 @@ function applyProject(d, opts = {}) {
   const prevActive = state.activeSource;
   pending = { articleLinkId: null, pdf: null }; hidePending(); hideInfo();
   state.title = d.title || ''; $('#title').value = state.title;
-  state.sources = (d.sources || []).map(s => ({ id: s.id, name: s.name, label: s.label, color: s.color, rel: s.rel, disk: !!s.disk, asset: s.asset || null, tooBig: !!s.tooBig }));
+  state.sources = (d.sources || []).map(s => ({ id: s.id, name: s.name, label: s.label, color: s.color, rel: s.rel, ...(s.also ? { also: s.also } : {}), disk: !!s.disk, asset: s.asset || null, tooBig: !!s.tooBig }));
   state.folder = d.folder || null;
   state.links = d.links || [];
   state.notes = d.notes || [];
@@ -2906,6 +2916,7 @@ const CHANGELOG = [
    'Contact support button (✉) next to the language switch',
    'Undo (↶ or Ctrl+Z) also brings back a link removed by mistake',
    'Numbered and bulleted lists split correctly across A4 pages',
+   'A PDF that sits in several subfolders is now shown and counted in each of them',
    '“What’s new” button (✦) next to the language switch'],
    ru: ['Выделение области на сканах: кнопка ▭ Область, обведите фрагмент рамкой; на страницах-сканах появляется подсказка',
    'Яркость выделений: ползунок (Мягко / Средне / Ярко) для выделений в статье и в PDF',
@@ -2917,6 +2928,7 @@ const CHANGELOG = [
    'Кнопка «Написать в поддержку» (✉) рядом с выбором языка',
    '«Отменить» (↶ или Ctrl+Z) возвращает и случайно удалённую ссылку',
    'Нумерованные и маркированные списки правильно переносятся между листами A4',
+   'PDF, который лежит в нескольких подпапках, теперь показывается и считается в каждой из них',
    'Кнопка «Что нового» (✦) рядом с выбором языка'],
    uk: ['Виділення області на сканах: кнопка ▭ Область, обведіть фрагмент рамкою; на сторінках-сканах з’являється підказка',
    'Яскравість виділень: повзунок (М’яко / Середньо / Яскраво) для виділень у статті та в PDF',
@@ -2928,6 +2940,7 @@ const CHANGELOG = [
    'Кнопка «Написати в підтримку» (✉) поруч із вибором мови',
    '«Скасувати» (↶ або Ctrl+Z) повертає й випадково видалене посилання',
    'Нумеровані й марковані списки правильно переносяться між аркушами A4',
+   'PDF, що лежить у кількох підпапках, тепер показується й рахується в кожній із них',
    'Кнопка «Що нового» (✦) поруч із вибором мови'],
    lt: ['Srities žymėjimas skenuotuose PDF: mygtukas ▭ Sritis, apveskite vietą rėmeliu; skenuotuose puslapiuose rodomas patarimas',
    'Paryškinimų ryškumas: slankiklis (Švelniai / Vidutiniškai / Ryškiai) straipsnyje ir PDF',
@@ -2939,6 +2952,7 @@ const CHANGELOG = [
    'Mygtukas „Rašyti pagalbai“ (✉) šalia kalbos pasirinkimo',
    '„Atšaukti“ (↶ arba Ctrl+Z) grąžina ir netyčia ištrintą nuorodą',
    'Numeruoti ir ženklinti sąrašai teisingai perkeliami tarp A4 lapų',
+   'PDF, esantis keliuose poaplankiuose, dabar rodomas ir skaičiuojamas kiekviename iš jų',
    'Mygtukas „Kas naujo“ (✦) šalia kalbos pasirinkimo'],
    fi: ['Alueen valinta skannatuissa PDF:issä: ▭ Alue -painike, vedä kehys kohdan ympärille; skannatuilla sivuilla näkyy vihje',
    'Korostusten kirkkaus: liukusäädin (Pehmeä / Keskitaso / Kirkas) artikkelissa ja PDF:ssä',
@@ -2950,6 +2964,7 @@ const CHANGELOG = [
    '”Ota yhteyttä tukeen” -painike (✉) kielivalinnan vieressä',
    'Kumoa (↶ tai Ctrl+Z) palauttaa myös vahingossa poistetun linkin',
    'Numeroidut ja luettelomerkityt luettelot jakautuvat oikein A4-sivuille',
+   'Useassa alikansiossa oleva PDF näytetään ja lasketaan nyt jokaisessa niistä',
    '”Mitä uutta” -painike (✦) kielivalinnan vieressä'] },
  { d: '2026-11-12', en: [
    'Word files are now the main format: New, Open, Save and Save as work with .docx',
