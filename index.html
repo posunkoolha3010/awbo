@@ -1588,6 +1588,28 @@ function onCopyCut(e, cut) {
 }
 editor.addEventListener('copy', e => onCopyCut(e, false));
 editor.addEventListener('cut', e => onCopyCut(e, true));
+function restorePastedMarks(tok) {
+  const find = str => {
+    const w = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) { const i = w.currentNode.nodeValue.indexOf(str); if (i >= 0) return [w.currentNode, i]; }
+    return null;
+  };
+  const caret = (() => { const s = getSelection(); return s.rangeCount ? [s.anchorNode, s.anchorOffset] : null; })();
+  tok.forEach((id, k) => {
+    const a = `\uE020${k}\uE021`, b = `\uE022${k}\uE023`;
+    const st = find(a); if (st) st[0].deleteData(st[1], a.length);
+    const en = find(b); if (en) en[0].deleteData(en[1], b.length);
+    if (!st || !en) return;
+    const r = document.createRange();
+    try { r.setStart(st[0], Math.min(st[1], st[0].nodeValue.length)); r.setEnd(en[0], Math.min(en[1], en[0].nodeValue.length)); } catch (_) { return; }
+    if (!r.collapsed) wrapRange(r, id, '', 'cite');
+  });
+  // the caret goes after the pasted text
+  if (caret && caret[0] && caret[0].isConnected) { try { setCaret(caret[0], Math.min(caret[1], caret[0].nodeType === 3 ? caret[0].nodeValue.length : caret[0].childNodes.length)); } catch (_) {} }
+  // drop any leftover markers
+  const w = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  while (w.nextNode()) { const n = w.currentNode; if (/[\uE020-\uE023]/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/\uE020\d+\uE021|\uE022\d+\uE023/g, ''); }
+}
 function linkIdInText(id) {
   if (editor.querySelector(`[data-link="${id}"]`)) return true;
   return (state.parts || []).some(p => p.id !== state.currentPart && (p.html || '').includes(`data-link="${id}"`));
@@ -1645,7 +1667,17 @@ editor.addEventListener('paste', e => {
       }
     }
   }
+  // Chrome turns a pasted <mark> into a plain span with a background: insert the linked phrases
+  // as invisible markers and wrap them back into links after the browser has inserted the text
+  const tok = [], tmp = document.createElement('div'); tmp.innerHTML = html;
+  tmp.querySelectorAll('mark.cite').forEach(mk => {
+    if (mk.parentElement && mk.parentElement.closest('mark.cite')) { mk.replaceWith(...mk.childNodes); return; }
+    const k = tok.length; tok.push(mk.dataset.link);
+    mk.replaceWith(document.createTextNode(`\uE020${k}\uE021`), ...mk.childNodes, document.createTextNode(`\uE022${k}\uE023`));
+  });
+  if (tok.length) html = tmp.innerHTML;
   document.execCommand('insertHTML', false, html);
+  if (tok.length) restorePastedMarks(tok);
   if (z) {
     const w = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT); const zs = [];
     while (w.nextNode()) if (w.currentNode.nodeValue.includes('\u200B')) zs.push(w.currentNode);
@@ -3092,18 +3124,23 @@ $('#helpBtn').onclick = async () => {
 const CHANGELOG = [
  { d: '2026-11-18', en: ['One phrase can point to several places in the PDFs: ＋ Add another place in the link panel; switch between them with ◀ ▶',
    'Pressing Enter in a long article no longer makes the page jump',
+   'Fixed: pasted cited text looked faded and had no link',
    'Copying, cutting and pasting keep citations: a pasted phrase keeps its own link and no longer joins the neighbouring one; a copy gets its own link to the same place in the PDF'],
    ru: ['Одна фраза может ссылаться на несколько мест в PDF: «＋ Добавить ещё место» в панели ссылки; переключение между ними — ◀ ▶',
    'Enter в длинной статье больше не заставляет страницу прыгать',
+   'Исправлено: вставленный процитированный текст был бледным и без ссылки',
    'Копирование, вырезание и вставка сохраняют цитирование: вставленная фраза сохраняет свою ссылку и больше не прилипает к соседней; копия получает свою ссылку на то же место в PDF'],
    uk: ['Одна фраза може посилатися на кілька місць у PDF: «＋ Додати ще місце» в панелі посилання; перемикання між ними — ◀ ▶',
    'Enter у довгій статті більше не змушує сторінку стрибати',
+   'Виправлено: вставлений процитований текст був блідим і без посилання',
    'Копіювання, вирізання та вставлення зберігають цитування: вставлена фраза зберігає своє посилання й більше не прилипає до сусіднього; копія отримує своє посилання на те саме місце в PDF'],
    lt: ['Viena frazė gali nurodyti kelias PDF vietas: „＋ Pridėti dar vieną vietą“ nuorodos skydelyje; perjungimas tarp jų — ◀ ▶',
    'Enter ilgame straipsnyje nebeverčia puslapio šokinėti',
+   'Pataisyta: įklijuotas cituotas tekstas buvo blankus ir be nuorodos',
    'Kopijuojant, iškerpant ir įklijuojant citavimas išlieka: įklijuota frazė išsaugo savo nuorodą ir nebeprilimpa prie gretimos; kopija gauna savo nuorodą į tą pačią PDF vietą'],
    fi: ['Yksi lause voi viitata useaan kohtaan PDF:issä: ”＋ Lisää toinen kohta” linkkipaneelissa; vaihda niiden välillä ◀ ▶',
    'Enter pitkässä artikkelissa ei enää saa sivua hyppimään',
+   'Korjattu: liitetty viitattu teksti näkyi haaleana ilman linkkiä',
    'Kopiointi, leikkaus ja liittäminen säilyttävät viittaukset: liitetty lause säilyttää oman linkkinsä eikä enää liity viereiseen; kopio saa oman linkin samaan kohtaan PDF:ssä'] },
  { d: '2026-11-13', en: [
    'Area selection for scanned PDFs: ▭ Area button, drag a frame over the passage; a hint appears when a page is a scan',
