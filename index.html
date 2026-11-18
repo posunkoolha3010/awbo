@@ -1522,11 +1522,100 @@ editor.addEventListener('beforeinput', e => {
 });
 function setCaret(node, off) { const r = document.createRange(); r.setStart(node, off); r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
-editor.addEventListener('paste', e => {
-  const html = e.clipboardData && e.clipboardData.getData('text/html');
-  if (!html) return;
+/* ---- copy / cut / paste that keep links ----
+   The browser drops our link marks from the clipboard and pastes next to a linked phrase *into* it,
+   so the pasted text would join the neighbouring citation. We put our own HTML (with the link data)
+   on the clipboard and, when pasting, step out of the neighbouring link first. */
+const AWBO_CLIP = 'awbo-clip';
+function markAncestor(n) { const el = n && (n.nodeType === 1 ? n : n.parentElement); const m = el && el.closest('mark.cite, mark.note'); return m && editor.contains(m) ? m : null; }
+function onCopyCut(e, cut) {
+  const sel = getSelection(); if (!sel.rangeCount || sel.isCollapsed) return;
+  const r = sel.getRangeAt(0); if (!editor.contains(r.commonAncestorContainer)) return;
+  const box = document.createElement('div');
+  let frag = r.cloneContents();
+  // a selection inside one linked phrase keeps that link
+  const m = markAncestor(r.commonAncestorContainer);
+  if (m) { const mm = m.cloneNode(false); mm.appendChild(frag); frag = document.createDocumentFragment(); frag.appendChild(mm); }
+  box.appendChild(frag);
+  box.querySelectorAll('mark.cite').forEach(x => { x.removeAttribute('style'); x.removeAttribute('title'); x.classList.remove('active'); });
+  box.querySelectorAll('.note-pin').forEach(x => x.remove());
+  box.querySelectorAll('mark.note').forEach(x => x.replaceWith(...x.childNodes));
+  const ids = [...new Set([...box.querySelectorAll('mark.cite')].map(x => x.dataset.link))];
+  const links = ids.map(linkById).filter(Boolean);
+  const html = `<div data-${AWBO_CLIP}="${esc(JSON.stringify({ links, sources: links.map(l => srcById(l.sourceId)).filter(Boolean) }))}">${box.innerHTML}</div>`;
   e.preventDefault();
-  document.execCommand('insertHTML', false, sanitizeHtml(html));
+  e.clipboardData.setData('text/html', html);
+  e.clipboardData.setData('text/plain', sel.toString());
+  if (cut) { document.execCommand('delete'); }
+}
+editor.addEventListener('copy', e => onCopyCut(e, false));
+editor.addEventListener('cut', e => onCopyCut(e, true));
+function linkIdInText(id) {
+  if (editor.querySelector(`[data-link="${id}"]`)) return true;
+  return (state.parts || []).some(p => p.id !== state.currentPart && (p.html || '').includes(`data-link="${id}"`));
+}
+editor.addEventListener('paste', e => {
+  const cd = e.clipboardData; if (!cd) return;
+  let html = cd.getData('text/html'), text = cd.getData('text/plain');
+  if (!html && !text) return;
+  e.preventDefault();
+  if (!getSelection().isCollapsed) document.execCommand('delete');
+  if (html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const wrap = doc.querySelector(`[data-${AWBO_CLIP}]`);
+    if (wrap) {
+      let data = {}; try { data = JSON.parse(wrap.getAttribute(`data-${AWBO_CLIP}`)); } catch (_) {}
+      const byId = new Map((data.links || []).map(l => [l.id, l]));
+      const srcs = new Map((data.sources || []).map(x => [x.id, x]));
+      const remap = new Map();
+      wrap.querySelectorAll('mark.cite').forEach(mk => {
+        const id = mk.dataset.link;
+        if (remap.has(id)) { mk.dataset.link = remap.get(id); return; }
+        let l = linkById(id);
+        if (!l && byId.has(id)) {          // pasted from another article: bring the link (and its source) along
+          const ol = byId.get(id), os = srcs.get(ol.sourceId);
+          let sid = srcById(ol.sourceId) ? ol.sourceId : null;
+          if (!sid && os) { const same = state.sources.find(x => (x.name || '').toLowerCase() === (os.name || '').toLowerCase()); sid = same ? same.id : null; }
+          if (sid) { l = { ...ol, sourceId: sid }; state.links.push(l); }
+        } else if (l && linkIdInText(id)) { // a copy of a phrase that is still in the text: give it its own link
+          l = { ...l, id: uid('L'), rects: (l.rects || []).map(r => ({ ...r })) }; state.links.push(l);
+        }
+        if (!l) { mk.replaceWith(...mk.childNodes); return; }
+        remap.set(id, l.id); mk.dataset.link = l.id;
+      });
+      html = wrap.innerHTML;
+    }
+    html = sanitizeHtml(html);
+  } else {
+    const lines = text.replace(/\r/g, '').split('\n');
+    html = lines.length === 1 ? esc(lines[0]) : lines.map(x => `<p>${esc(x) || '<br>'}</p>`).join('');
+  }
+  // step out of a linked phrase whose edge the caret is on, so the pasted text does not join it
+  const sel = getSelection(); let z = null;
+  if (sel.rangeCount) {
+    const n = sel.anchorNode, off = sel.anchorOffset, m = markAncestor(n);
+    if (m) {
+      const texts = []; const w = document.createTreeWalker(m, NodeFilter.SHOW_TEXT); while (w.nextNode()) texts.push(w.currentNode);
+      const atEnd = n.nodeType === 3 ? off === n.nodeValue.length && texts[texts.length - 1] === n : off >= n.childNodes.length;
+      const atStart = n.nodeType === 3 ? off === 0 && texts[0] === n : off === 0;
+      if (atEnd || atStart) {
+        z = document.createTextNode('\u200B'); atEnd ? m.after(z) : m.before(z);
+        setCaret(z, atEnd ? 1 : 0);
+      } else if (/<mark/i.test(html)) {
+        // pasting linked text into the middle of another linked phrase: drop the inner links' nesting
+        html = html.replace(/<mark\b[^>]*>|<\/mark>/gi, '');
+      }
+    }
+  }
+  document.execCommand('insertHTML', false, html);
+  if (z) {
+    const w = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT); const zs = [];
+    while (w.nextNode()) if (w.currentNode.nodeValue.includes('\u200B')) zs.push(w.currentNode);
+    const s2 = getSelection(), an = s2.anchorNode, ao = s2.anchorOffset;
+    zs.forEach(t => { const i = t.nodeValue.indexOf('\u200B'); t.deleteData(i, 1); if (t === an && ao > i) setCaret(t, ao - 1); if (!t.nodeValue.length) t.remove(); });
+  }
+  editor.querySelectorAll('mark.cite mark.cite').forEach(x => x.replaceWith(...x.childNodes));
+  refreshMarks(); drawHighlights(); scheduleSave(); scheduleLayout();
 });
 
 const ALLOWED = new Set(['P','BR','B','STRONG','I','EM','U','SUP','SUB','H1','H2','H3','H4','UL','OL','LI','TABLE','THEAD','TBODY','TR','TD','TH','IMG','MARK','BLOCKQUOTE']);
@@ -2924,6 +3013,11 @@ $('#helpBtn').onclick = async () => {
 /* ---------------- what's new ---------------- */
 /*CHANGELOG-START*/
 const CHANGELOG = [
+ { d: '2026-11-18', en: ['Copying, cutting and pasting keep citations: a pasted phrase keeps its own link and no longer joins the neighbouring one; a copy gets its own link to the same place in the PDF'],
+   ru: ['Копирование, вырезание и вставка сохраняют цитирование: вставленная фраза сохраняет свою ссылку и больше не прилипает к соседней; копия получает свою ссылку на то же место в PDF'],
+   uk: ['Копіювання, вирізання та вставлення зберігають цитування: вставлена фраза зберігає своє посилання й більше не прилипає до сусіднього; копія отримує своє посилання на те саме місце в PDF'],
+   lt: ['Kopijuojant, iškerpant ir įklijuojant citavimas išlieka: įklijuota frazė išsaugo savo nuorodą ir nebeprilimpa prie gretimos; kopija gauna savo nuorodą į tą pačią PDF vietą'],
+   fi: ['Kopiointi, leikkaus ja liittäminen säilyttävät viittaukset: liitetty lause säilyttää oman linkkinsä eikä enää liity viereiseen; kopio saa oman linkin samaan kohtaan PDF:ssä'] },
  { d: '2026-11-13', en: [
    'Area selection for scanned PDFs: ▭ Area button, drag a frame over the passage; a hint appears when a page is a scan',
    'Highlight brightness: a slider (Soft / Medium / Bright) for highlights in the article and in the PDF',
