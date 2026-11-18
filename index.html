@@ -69,7 +69,7 @@ body.noparts #parts{display:none}
 .part:hover .pa,.part.on .pa{display:flex}
 .part .pa button{border:0;background:#fff;border-radius:4px;font-size:11px;padding:2px 5px;color:var(--muted);box-shadow:0 0 0 1px var(--line)}
 .part .pa button:hover{color:var(--ink)}
-#edScroll{flex:1;overflow:auto;padding:16px 16px 80px}
+#edScroll{flex:1;overflow:auto;overflow-anchor:none;padding:16px 16px 80px}
 #pageWrap{max-width:794px;margin:0 auto}
 #partTitle{display:block;width:100%;border:1px solid transparent;background:transparent;border-radius:6px;padding:6px 8px;margin-bottom:8px;font:600 17px Inter,sans-serif;color:var(--ink)}
 #partTitle:hover,#partTitle:focus{border-color:var(--line);background:#fff;outline:none}
@@ -2548,7 +2548,20 @@ function fixListWrappers() {
 }
 let layoutT = null;
 function scheduleLayout() { clearTimeout(layoutT); layoutT = setTimeout(layoutPages, 120); }
+// where the caret is on screen, so a relayout can keep the line you type in still
+function caretScreenTop() {
+  const s = getSelection(); if (!s.rangeCount || !editor.contains(s.anchorNode)) return null;
+  const r = s.getRangeAt(0).cloneRange(); r.collapse(true);
+  let b = r.getClientRects()[0];
+  if (!b) { const el = s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement; b = el && el.getBoundingClientRect(); }
+  return b ? b.top : null;
+}
 function layoutPages() {
+  const sc = $('#edScroll'), anchor = caretScreenTop();
+  layoutPagesInner();
+  if (anchor !== null && sc) { const now = caretScreenTop(); if (now !== null && Math.abs(now - anchor) > 1) sc.scrollTop += now - anchor; }
+}
+function layoutPagesInner() {
   editor.querySelectorAll('[data-pb]').forEach(e => { e.removeAttribute('data-pb'); e.style.removeProperty('margin-top'); if (!e.getAttribute('style')) e.removeAttribute('style'); });
   const sheets = $('#sheets'), pw = $('#pageWrap');
   if (!a4On()) { sheets.innerHTML = ''; editor.style.removeProperty('min-height'); pw.style.removeProperty('zoom'); renderNotes(); return; }
@@ -2581,7 +2594,16 @@ function layoutPages() {
   }
   renderNotes();
 }
-editor.addEventListener('input', scheduleLayout);
+editor.addEventListener('input', e => {
+  if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+    // Enter copies the page-break spacing of the paragraph into the new one: drop it and relayout at once
+    const s = getSelection(), n = s.anchorNode;
+    const blk = n && (n.nodeType === 1 ? n : n.parentElement).closest('p,li,h1,h2,h3,h4,blockquote,div');
+    [blk, blk && blk.previousElementSibling].forEach(b => { if (b && editor.contains(b) && b.dataset.pb) { b.removeAttribute('data-pb'); b.style.removeProperty('margin-top'); if (!b.getAttribute('style')) b.removeAttribute('style'); } });
+    clearTimeout(layoutT); layoutPages(); return;
+  }
+  scheduleLayout();
+});
 editor.addEventListener('load', scheduleLayout, true);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => layoutPages());
 let a4Pref = true; try { a4Pref = localStorage.getItem('awbo-a4') !== '0'; } catch (e) {}
@@ -3013,11 +3035,16 @@ $('#helpBtn').onclick = async () => {
 /* ---------------- what's new ---------------- */
 /*CHANGELOG-START*/
 const CHANGELOG = [
- { d: '2026-11-18', en: ['Copying, cutting and pasting keep citations: a pasted phrase keeps its own link and no longer joins the neighbouring one; a copy gets its own link to the same place in the PDF'],
-   ru: ['Копирование, вырезание и вставка сохраняют цитирование: вставленная фраза сохраняет свою ссылку и больше не прилипает к соседней; копия получает свою ссылку на то же место в PDF'],
-   uk: ['Копіювання, вирізання та вставлення зберігають цитування: вставлена фраза зберігає своє посилання й більше не прилипає до сусіднього; копія отримує своє посилання на те саме місце в PDF'],
-   lt: ['Kopijuojant, iškerpant ir įklijuojant citavimas išlieka: įklijuota frazė išsaugo savo nuorodą ir nebeprilimpa prie gretimos; kopija gauna savo nuorodą į tą pačią PDF vietą'],
-   fi: ['Kopiointi, leikkaus ja liittäminen säilyttävät viittaukset: liitetty lause säilyttää oman linkkinsä eikä enää liity viereiseen; kopio saa oman linkin samaan kohtaan PDF:ssä'] },
+ { d: '2026-11-18', en: ['Pressing Enter in a long article no longer makes the page jump',
+   'Copying, cutting and pasting keep citations: a pasted phrase keeps its own link and no longer joins the neighbouring one; a copy gets its own link to the same place in the PDF'],
+   ru: ['Enter в длинной статье больше не заставляет страницу прыгать',
+   'Копирование, вырезание и вставка сохраняют цитирование: вставленная фраза сохраняет свою ссылку и больше не прилипает к соседней; копия получает свою ссылку на то же место в PDF'],
+   uk: ['Enter у довгій статті більше не змушує сторінку стрибати',
+   'Копіювання, вирізання та вставлення зберігають цитування: вставлена фраза зберігає своє посилання й більше не прилипає до сусіднього; копія отримує своє посилання на те саме місце в PDF'],
+   lt: ['Enter ilgame straipsnyje nebeverčia puslapio šokinėti',
+   'Kopijuojant, iškerpant ir įklijuojant citavimas išlieka: įklijuota frazė išsaugo savo nuorodą ir nebeprilimpa prie gretimos; kopija gauna savo nuorodą į tą pačią PDF vietą'],
+   fi: ['Enter pitkässä artikkelissa ei enää saa sivua hyppimään',
+   'Kopiointi, leikkaus ja liittäminen säilyttävät viittaukset: liitetty lause säilyttää oman linkkinsä eikä enää liity viereiseen; kopio saa oman linkin samaan kohtaan PDF:ssä'] },
  { d: '2026-11-13', en: [
    'Area selection for scanned PDFs: ▭ Area button, drag a frame over the passage; a hint appears when a page is a scan',
    'Highlight brightness: a slider (Soft / Medium / Bright) for highlights in the article and in the PDF',
