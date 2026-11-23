@@ -2475,7 +2475,23 @@ function applyBaseSize() {
   scheduleLayout();
 }
 // size of the whole article: every part, and per-word sizes are cleared
+// selection as character offsets in the editor, so it survives changes to the markup
+function selOffsets() {
+  const s = getSelection(); if (!s.rangeCount || !editor.contains(s.getRangeAt(0).commonAncestorContainer)) return null;
+  const r = s.getRangeAt(0), pos = (n, o) => { const x = document.createRange(); x.selectNodeContents(editor); x.setEnd(n, o); return x.toString().length; };
+  return [pos(r.startContainer, r.startOffset), pos(r.endContainer, r.endOffset)];
+}
+function setSelOffsets(o) {
+  if (!o) return;
+  const find = k => { const w = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT); let acc = 0, last = null;
+    while (w.nextNode()) { const n = w.currentNode, L = n.nodeValue.length; if (acc + L >= k) return [n, k - acc]; acc += L; last = n; }
+    return last ? [last, last.nodeValue.length] : [editor, 0]; };
+  const a = find(o[0]), b = find(o[1]), r = document.createRange();
+  try { r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); } catch (_) { return; }
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r); saveRange();
+}
 function setArticleSize(pt) {
+  const keep = selOffsets();
   storeCurrentPart();
   const strip = root => root.querySelectorAll('span[style*="font-size"]').forEach(x => { x.style.removeProperty('font-size'); if (!x.getAttribute('style')) x.replaceWith(...x.childNodes); });
   strip(editor);
@@ -2483,7 +2499,8 @@ function setArticleSize(pt) {
     if (p.id === state.currentPart) { p.html = cleanHtml(editor); continue; }
     const d = document.createElement('div'); d.innerHTML = p.html || ''; strip(d); p.html = d.innerHTML;
   }
-  state.baseSize = +pt; applyBaseSize(); scheduleSave(); updateFormatState();
+  state.baseSize = +pt; applyBaseSize(); scheduleSave();
+  setSelOffsets(keep); hidePopup(); updateFormatState();
   toast(`Text size ${pt} pt for the whole article (all parts)`);
 }
 function applySize(pt) {
@@ -2492,6 +2509,7 @@ function applySize(pt) {
   const inEd = sel.rangeCount && editor.contains(sel.getRangeAt(0).commonAncestorContainer);
   const all = inEd && !sel.isCollapsed && sel.toString().replace(/\s/g, '').length >= editor.innerText.replace(/\s/g, '').length - 1;
   if (!inEd || sel.isCollapsed || all) { setArticleSize(pt); return; }
+  const keep = selOffsets();
   try { document.execCommand('styleWithCSS', false, false); } catch (e) {}
   document.execCommand('fontSize', false, '7');
   editor.querySelectorAll('font[size="7"], span[style*="xxx-large"]').forEach(f => {
@@ -2499,6 +2517,7 @@ function applySize(pt) {
     sp.append(...f.childNodes); f.replaceWith(sp);
     sp.querySelectorAll('span[style*="font-size"]').forEach(x => { x.style.removeProperty('font-size'); if (!x.getAttribute('style')) x.replaceWith(...x.childNodes); });
   });
+  setSelOffsets(keep);
   scheduleSave(); scheduleLayout(); updateFormatState();
 }
 function currentBlock() {
