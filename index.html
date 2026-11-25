@@ -624,6 +624,15 @@ const isPdfName = n => /\.pdf$/i.test(n);
 const baseName = p => String(p).split(/[\\/]/).pop();
 // Remembered folder (Chrome/Edge outside claude.ai): read PDFs straight from disk, no re-picking
 let FSA = false; try { FSA = !DESK && 'showDirectoryPicker' in window && window.self === window.top; } catch (e) {}
+// some browsers (e.g. Opera) have the system file pickers but refuse them: then use the classic file dialogs
+let FSA_OFF = false; try { FSA_OFF = localStorage.getItem('awbo-fsa-off') === '1'; } catch (e) {}
+if (FSA_OFF) FSA = false;
+function pickerFailed(e, t0) {
+  // a real "Cancel" takes the person at least a moment; an instant refusal means the browser blocks the picker
+  const broken = !(e && e.name === 'AbortError') || (performance.now() - t0 < 400);
+  if (broken) { FSA = false; FSA_OFF = true; try { localStorage.setItem('awbo-fsa-off', '1'); } catch (_) {} console.warn('System file picker unavailable, using classic dialogs', e); }
+  return broken;
+}
 let dirHandle = null;
 async function listDir(h, prefix = '', depth = 0, out = []) {
   for await (const [name, x] of h.entries()) {
@@ -652,7 +661,9 @@ async function fileFromDir(rel) {
 }
 async function pickFolder() {
   if (FSA) {
-    try { dirHandle = await window.showDirectoryPicker({ id: 'awbo-pdfs', mode: 'read' }); } catch (e) { return; }
+    const t0 = performance.now();
+    try { dirHandle = await window.showDirectoryPicker({ id: 'awbo-pdfs', mode: 'read' }); }
+    catch (e) { if (pickerFailed(e, t0)) $('#fFolder').click(); return; }
     idbPut('kv', 'dirHandle', dirHandle); dirCache = null;
     state.folder = { name: dirHandle.name };
     await syncFolder(await listDir(dirHandle));
@@ -1877,7 +1888,7 @@ function renderLinksPanel() {
 // Word files are AWBO's own format: Open / Save / Save as
 let fileHandle = null;   // the .docx that Save writes back to (Chrome/Edge outside claude.ai)
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const canPickFiles = () => FSA && 'showOpenFilePicker' in window && 'showSaveFilePicker' in window;
+const canPickFiles = () => FSA && !FSA_OFF && 'showOpenFilePicker' in window && 'showSaveFilePicker' in window;
 // show unexpected errors instead of failing silently (helps to report problems)
 let lastErrT = 0;
 function showErr(e) {
@@ -1897,14 +1908,16 @@ $('#bOpen').onclick = async () => {
   }
   openOpts = { add };
   if (canPickFiles()) {
+    const t0 = performance.now();
     try {
       const [h] = await window.showOpenFilePicker({ id: 'awbo-docs', types: [{ description: 'Word / AWBO', accept: { [DOCX_TYPE]: ['.docx'], 'application/json': ['.json'] } }] });
       const f = await h.getFile();
       if (/\.docx$/i.test(f.name) && !add) { fileHandle = h; idbPut('kv', 'fileHandle', h); }
       await openFile(f);
     } catch (e) {
-      if (e && e.name === 'AbortError') return;          // the user closed the picker
-      console.error(e); toast('Could not open the file: ' + (e && e.message || e));
+      if (!pickerFailed(e, t0)) return;                   // the user closed the picker
+      if (e && e.name !== 'AbortError' && e.name !== 'SecurityError' && e.name !== 'NotAllowedError' && e.name !== 'TypeError') { console.error(e); toast('Could not open the file: ' + (e && e.message || e)); return; }
+      $('#fDocx').click();                                // fall back to the classic dialog
     }
     return;
   }
@@ -3237,6 +3250,11 @@ $('#helpBtn').onclick = async () => {
 /* ---------------- what's new ---------------- */
 /*CHANGELOG-START*/
 const CHANGELOG = [
+ { d: '2026-11-25', en: ['Opera and other browsers that block the system file dialogs: Open, Save and the folder now fall back to the classic dialogs', 'Errors are shown on screen instead of nothing happening; if the article saved in the browser cannot be restored, the site still starts and keeps a copy'],
+   ru: ['Opera и другие браузеры, которые блокируют системные окна выбора файлов: «Открыть», «Сохранить» и папка теперь переходят на обычные окна', 'Ошибки показываются на экране, а не «ничего не происходит»; если сохранённую в браузере статью не удаётся восстановить, сайт всё равно запускается и хранит её копию'],
+   uk: ['Opera та інші браузери, які блокують системні вікна вибору файлів: «Відкрити», «Зберегти» й папка тепер переходять на звичайні вікна', 'Помилки показуються на екрані, а не «нічого не відбувається»; якщо збережену в браузері статтю не вдається відновити, сайт усе одно запускається і зберігає її копію'],
+   lt: ['Opera ir kitos naršyklės, blokuojančios sistemos failų langus: „Atidaryti“, „Išsaugoti“ ir aplankas dabar naudoja įprastus langus', 'Klaidos rodomos ekrane, o ne „nieko nevyksta“; jei naršyklėje išsaugoto straipsnio atkurti nepavyksta, svetainė vis tiek paleidžiama ir išsaugo jo kopiją'],
+   fi: ['Opera ja muut selaimet, jotka estävät järjestelmän tiedostoikkunat: Avaa, Tallenna ja kansio käyttävät nyt tavallisia ikkunoita', 'Virheet näytetään näytöllä sen sijaan, ettei mitään tapahdu; jos selaimeen tallennettua artikkelia ei voi palauttaa, sivusto käynnistyy silti ja säilyttää siitä kopion'] },
  { d: '2026-11-23', en: ['Text size now changes in every part: with nothing selected (or the whole part selected), the size applies to the whole article; with a few words selected, only to them'],
    ru: ['Размер текста теперь меняется во всех разделах: если ничего не выделено (или выделен весь раздел), размер ставится для всей статьи; если выделено несколько слов — только для них'],
    uk: ['Розмір тексту тепер змінюється в усіх розділах: якщо нічого не виділено (або виділено весь розділ), розмір ставиться для всієї статті; якщо виділено кілька слів — лише для них'],
