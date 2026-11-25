@@ -1,4 +1,4 @@
-# AWBO — Article Writer by Olha
+# AWBO
 
 A web app for writing scientific articles with every phrase linked to the exact passage in its source PDF.
 
