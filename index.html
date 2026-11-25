@@ -1878,6 +1878,15 @@ function renderLinksPanel() {
 let fileHandle = null;   // the .docx that Save writes back to (Chrome/Edge outside claude.ai)
 const DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const canPickFiles = () => FSA && 'showOpenFilePicker' in window && 'showSaveFilePicker' in window;
+// show unexpected errors instead of failing silently (helps to report problems)
+let lastErrT = 0;
+function showErr(e) {
+  const msg = (e && (e.message || e.reason && e.reason.message || e.reason)) || String(e);
+  if (!msg || /ResizeObserver|AbortError|The user aborted/i.test(msg) || Date.now() - lastErrT < 3000) return;
+  lastErrT = Date.now(); toast('⚠ Error: ' + String(msg).slice(0, 160));
+}
+window.addEventListener('error', showErr);
+window.addEventListener('unhandledrejection', e => showErr(e.reason || e));
 $('#bOpen').onclick = async () => {
   storeCurrentPart();
   const hasText = state.parts.some(p => p.title || partWords(p.html));
@@ -1893,7 +1902,10 @@ $('#bOpen').onclick = async () => {
       const f = await h.getFile();
       if (/\.docx$/i.test(f.name) && !add) { fileHandle = h; idbPut('kv', 'fileHandle', h); }
       await openFile(f);
-    } catch (e) {}
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;          // the user closed the picker
+      console.error(e); toast('Could not open the file: ' + (e && e.message || e));
+    }
     return;
   }
   $('#fDocx').click();
@@ -3102,6 +3114,9 @@ const q = (lang, x) => lang === 'lt' ? '„' + x + '“' : lang === 'fi' ? '”'
 const nLinks = (L, n) => n + ' ' + plural(n, L, P3(L, ['ссылка', 'ссылки', 'ссылок'], ['посилання', 'посилання', 'посилань'], ['nuoroda', 'nuorodos', 'nuorodų'], ['linkki', 'linkkiä']));
 const nWords = (L, n) => n + ' ' + plural(n, L, P3(L, ['слово', 'слова', 'слов'], ['слово', 'слова', 'слів'], ['žodis', 'žodžiai', 'žodžių'], ['sana', 'sanaa']));
 const PAT = [
+  [/^⚠ The saved article could not be restored \((.*)\)\. A copy was kept; open your \.docx\.$/, (L, e) => P3(L, `⚠ Не удалось восстановить сохранённую статью (${e}). Копия сохранена; откройте ваш .docx.`, `⚠ Не вдалося відновити збережену статтю (${e}). Копію збережено; відкрийте ваш .docx.`, `⚠ Nepavyko atkurti išsaugoto straipsnio (${e}). Kopija išsaugota; atidarykite savo .docx.`, `⚠ Tallennettua artikkelia ei voitu palauttaa (${e}). Kopio säilytettiin; avaa .docx-tiedostosi.`)],
+  [/^⚠ Error: (.*)$/, (L, e) => P3(L, '⚠ Ошибка: ', '⚠ Помилка: ', '⚠ Klaida: ', '⚠ Virhe: ') + e],
+  [/^Could not open the file: (.*)$/, (L, e) => P3(L, 'Не удалось открыть файл: ', 'Не вдалося відкрити файл: ', 'Nepavyko atidaryti failo: ', 'Tiedoston avaaminen epäonnistui: ') + e],
   [/^([\d.]+) pt$/, (L, n) => n + ' ' + P3(L, 'пт', 'пт', 'pt', 'pt')],
   [/^Text size ([\d.]+) pt for the whole article \(all parts\)$/, (L, n) => P3(L, `Размер текста ${n} pt для всей статьи (все разделы)`, `Розмір тексту ${n} pt для всієї статті (усі розділи)`, `Teksto dydis ${n} pt visam straipsniui (visi skyriai)`, `Tekstin koko ${n} pt koko artikkeliin (kaikki osat)`)],
   [/^(.*) · (\d+) words$/, (L, a, n) => (I18N[L][a] || a) + ' · ' + nWords(L, n)],
@@ -3439,11 +3454,18 @@ addEventListener('focus', async () => {
   if (!window.pdfjsLib || !window.mammoth || !window.docx) { setStatus('Libraries failed to load — reload the page'); }
   idb = await idbOpen();
   if (FSA) { try { dirHandle = await idbGet('kv', 'dirHandle') || null; fileHandle = await idbGet('kv', 'fileHandle') || null; } catch (e) {} }
-  const d = await idbGet('kv', 'project');
+  let d = null; try { d = await idbGet('kv', 'project'); } catch (e) { console.error(e); }
+  let restored = false;
   if (d && d.app === 'citelink') {
-    applyProject(d);
-    setStatus(idb ? 'Restored from browser · ' + wordCount() : '');
-  } else {
+    try { applyProject(d); restored = true; setStatus(idb ? 'Restored from browser · ' + wordCount() : ''); }
+    catch (e) {
+      // the saved article could not be loaded: keep a copy and start clean so the site still works
+      console.error(e);
+      try { await idbPut('kv', 'project-backup-' + Date.now(), d); } catch (_) {}
+      toast('⚠ The saved article could not be restored (' + (e && e.message || e) + '). A copy was kept; open your .docx.');
+    }
+  }
+  if (!restored) {
     applyProject({ title: '', html: '<p><br></p>', sources: [], links: [] });
     setStatus(idb ? 'Autosave in browser is on' : 'Autosave unavailable — save the project to a file');
   }
