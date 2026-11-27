@@ -2009,7 +2009,9 @@ const canPickFiles = () => FSA && !FSA_OFF && 'showOpenFilePicker' in window && 
 let lastErrT = 0;
 function showErr(e) {
   const msg = (e && (e.message || e.reason && e.reason.message || e.reason)) || String(e);
-  if (!msg || /ResizeObserver|AbortError|The user aborted/i.test(msg) || Date.now() - lastErrT < 3000) return;
+  const name = e && (e.name || e.reason && e.reason.name) || '';
+  // pdf.js cancels drawing of pages that scrolled away: that is normal, not an error
+  if (!msg || /RenderingCancelled/i.test(name) || /ResizeObserver|AbortError|The user aborted|Rendering cancelled|Worker was destroyed|Transport destroyed/i.test(msg) || Date.now() - lastErrT < 3000) return;
   lastErrT = Date.now(); toast('⚠ Error: ' + String(msg).slice(0, 160));
 }
 window.addEventListener('error', showErr);
